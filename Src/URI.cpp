@@ -5,6 +5,9 @@
 #include "Cacus/CacusString.h"
 
 
+// WARNING: MUST NOT USE THE CACUSLIB STRING BUFFER, IT USES THREAD_LOCAL STORAGE NOW
+// THIS MAY CAUSE WINDOWS XP COMPATIBILITY ISSUES
+
 //========= FStringBetween - begin ==========//
 //
 // Creates a FString with the character between Start and EndNull

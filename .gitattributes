@@ -1,0 +1,55 @@
+# Enforce some common default.
+* text=auto
+
+# Mark workspace and project files as lf text.
+*.dsp text eol=lf
+*.dsw text eol=lf
+*.sln text eol=lf
+*.vc*proj* text
+
+# ignore shaders
+*.frag binary
+*.geo binary
+*.vert binary
+
+# Mark substance files as lf
+*.sbs text eol=lf
+
+# Mark source files as lf text.
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.rc text=crlf
+*.uc text eol=lf
+
+# Mark some script/markup files as lf.
+*.upkg text eol=lf
+*.bat text eol=crlf
+
+# Mark localization files as lf text.
+*.int text eol=lf
+*.det text eol=lf
+*.itt text eol=lf
+*.frt text eol=lf
+
+# Mark Unreal Package as binary.
+*.u binary
+*.utx binary
+*.uax binary
+*.umx binary
+*.unr binary
+*.nrf binary
+*.dx binary
+
+# These shouldn't be checked in though.
+*.uxx binary
+*.nsg binary
+*.dxs binary
+
+# Mark common texture and sound formats as binary
+*.pcx binary
+*.bmp binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ico binary
