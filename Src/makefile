@@ -17,7 +17,9 @@ SRCS = XC_CoreScript.cpp	\
 	PathBuilder.cpp	\
 	RouteMapper.cpp	\
 	Math.cpp	\
-	URI.cpp
+	URI.cpp	\
+	GameSaver.cpp
+
 
 OBJS = $(SRCS:%.cpp=$(OBJDIR)%.o)
 
