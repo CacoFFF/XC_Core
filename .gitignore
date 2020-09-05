@@ -1,3 +1,8 @@
+# GCC intermediate files
+*.d
+*.lst
+
+# MSVC intermediate files
 *.sdf
 *.db
 *.pdb
@@ -5,11 +10,12 @@
 *.ncb
 *.opt
 *.plg
+*.tlog
+*.user
+*.exp
+*.log
 .vc/
 ipch/
-Debug/
-XC_Core___Win32_Debug/
-
 
 
 # Compiled Object files

@@ -67,13 +67,32 @@ template <typename T> inline void InvertArray( TArray<T>& A)
 		ExchangeRaw( A(i), A(Num-(i+1)) );
 }
 
+
+#if __cplusplus >= 201103L || _MSVC_LANG >= 201103L
+template <size_t ArrayCount> inline size_t appToAnsiInPlace( ANSICHAR (&Dst)[ArrayCount], const TCHAR* Src)
+{
+	return appToAnsiInPlace( Dst, Src, ArrayCount);
+}
+template <size_t ArrayCount> inline size_t appToUnicodeInPlace( UNICHAR (&Dst)[ArrayCount], const TCHAR* Src)
+{
+	return appToUnicodeInPlace( Dst, Src, ArrayCount);
+}
+template <size_t ArrayCount> inline size_t appFromAnsiInPlace( TCHAR (&Dst)[ArrayCount], const ANSICHAR* Src)
+{
+	return appFromAnsiInPlace( Dst, Src, ArrayCount);
+}
+template <size_t ArrayCount> inline size_t appFromUnicodeInPlace( TCHAR (&Dst)[ArrayCount], const UNICHAR* Src)
+{
+	return appFromUnicodeInPlace( Dst, Src, ArrayCount);
+}
 template < INT cmpsize > inline INT appStrncmp( const TCHAR* S1, const TCHAR(&S2)[cmpsize])
 {
 	return appStrncmp( S1, S2, cmpsize-1);
 }
-
 template < INT cmpsize > inline INT appStrnicmp( const TCHAR* S1, const TCHAR(&S2)[cmpsize])
 {
 	return appStrnicmp( S1, S2, cmpsize-1);
 }
+#endif
+
 #endif
