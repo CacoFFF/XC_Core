@@ -41,6 +41,7 @@ $(OBJS) : $(OBJDIR)%.o : %.cpp
 #Generate dependancies
 #%.d : %.cpp
 $(DEPS) : $(OBJDIR)%.d : %.cpp
+	@mkdir -p $(OBJDIR)
 	@echo $(@:%.d=%.o) $@ : \\ > $@
 	@/bin/sh -ec '$(CXX) -MM $(PREPROCESSORS) $(CXXFLAGS) $(INCLUDES) $< | \
 		sed -e '\''s/.*://'\'' >> $@'

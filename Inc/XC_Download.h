@@ -67,6 +67,12 @@ class XC_CORE_API UXC_FileChannel : public UFileChannel
 {
 	DECLARE_CLASS(UXC_FileChannel,UFileChannel,CLASS_Transient,XC_Core);
 
+	// Do we have a LZMA server active?
+	static class ULZMAServer* GLZMA;
+	FGuid LZMA_PendingGuid;
+	FTime LZMA_Timeout;
+
+
 	// Receive Variables.
 /*	UChannelDownload*	Download;		 // UDownload when receiving.
 
@@ -76,7 +82,6 @@ class XC_CORE_API UXC_FileChannel : public UFileChannel
 	INT					PackageIndex;	 // Index of package in map.
 	INT					SentData;		 // Number of bytes sent.
 */
-
 	// Constructor.
 	void StaticConstructor()
 	{
@@ -93,6 +98,7 @@ class XC_CORE_API UXC_FileChannel : public UFileChannel
 	// UFileChannel interface.
 //	FString Describe();
 	void Tick();
+	UBOOL ProcessGuid( const FGuid& Guid, UBOOL UseGLZMA);
 };
 
 

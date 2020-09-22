@@ -16,6 +16,8 @@
 
 void UZDecompress( const TCHAR* SourceFilename, const TCHAR* DestFilename, TCHAR* Error);
 
+ULZMAServer* UXC_FileChannel::GLZMA = nullptr;
+
 /*----------------------------------------------------------------------------
 	Asynchronous processor.
 ----------------------------------------------------------------------------*/
@@ -460,42 +462,8 @@ void UXC_FileChannel::ReceivedBunch( FInBunch& Bunch )
 			// Request to send a file.
 			FGuid Guid;
 			Bunch << Guid;
-			if( !Bunch.IsError() )
-			{
-				for( INT i=0; i<Connection->PackageMap->List.Num(); i++ )
-				{
-					FPackageInfo& Info = Connection->PackageMap->List(i);
-					if( Info.Guid==Guid && Info.URL!=TEXT("") )
-					{
-						if( Connection->Driver->MaxDownloadSize>0 && GFileManager->FileSize(*Info.URL) > Connection->Driver->MaxDownloadSize )
-							break;							
-						appStrncpy( SrcFilename, *Info.URL, ARRAY_COUNT(SrcFilename) );
-						if( Connection->Driver->Notify->NotifySendingFile( Connection, Guid ) )
-						{
-							check(Info.Linker);
-							SendFileAr = NULL;
-							FString FileToSend( SrcFilename);
-							FileToSend += TEXT(".lzma");
-							SendFileAr = GFileManager->CreateFileReader( *FileToSend);
-							if ( !SendFileAr )
-							{
-								FileToSend = SrcFilename;
-								FileToSend += TEXT(".uz");
-								SendFileAr = GFileManager->CreateFileReader( *FileToSend);
-							}
-							if ( !SendFileAr )
-								SendFileAr = GFileManager->CreateFileReader( SrcFilename );
-							if( SendFileAr )
-							{
-								// Accepted! Now initiate file sending.
-								debugf( NAME_DevNet, LocalizeProgress(TEXT("NetSend"),TEXT("Engine")), *FileToSend );
-								PackageIndex = i;
-								return;
-							}
-						}
-					}
-				}
-			}
+			if( !Bunch.IsError() && ProcessGuid( Guid, true) )
+				return;
 		}
 
 		// Illegal request; refuse it by closing the channel.
@@ -510,8 +478,25 @@ void UXC_FileChannel::ReceivedBunch( FInBunch& Bunch )
 static UBOOL LanPlay = -1; //Prevent static init inside function, newer compilers try to do it thread-safe when not necessary
 void UXC_FileChannel::Tick()
 {
+	if ( Closing )
+		return;
+
 	UChannel::Tick();
 	Connection->TimeSensitive = 1;
+
+	if ( !SendFileAr && (LZMA_PendingGuid != FGuid(0,0,0,0)) )
+	{
+		UBOOL bTimedOut = Connection->Driver->Time > LZMA_Timeout;
+		if ( bTimedOut )
+			debugf( NAME_DevNet, TEXT("LZMA Server timeout, send file without compression.") );
+		if ( !ProcessGuid( LZMA_PendingGuid, !bTimedOut) && bTimedOut )
+		{
+			if ( bTimedOut )
+				Close();
+			return;
+		}
+	}
+
 	INT Size;
 
 	//TIM: IsNetReady(1) causes the client's bandwidth to be saturated. Good for clients, very bad
@@ -548,6 +533,83 @@ void UXC_FileChannel::Tick()
 			SendFileAr = nullptr;
 		}
 	}
+}
+
+UBOOL UXC_FileChannel::ProcessGuid( const FGuid& Guid, UBOOL UseGLZMA)
+{
+	guard(UXC_FileChannel::ProcessGuid);
+
+	for( INT i=0; i<Connection->PackageMap->List.Num(); i++ )
+	{
+		FPackageInfo& Info = Connection->PackageMap->List(i);
+		if( Info.Guid==Guid && Info.URL!=TEXT("") )
+		{
+			if ( (LZMA_PendingGuid != Guid) && !Connection->Driver->Notify->NotifySendingFile( Connection, Guid) )
+				return 0;
+
+			FString FileToSend;
+			SendFileAr = nullptr;
+
+			FLZMASourceBase* Source = (UseGLZMA && GLZMA) ? GLZMA->GetSource(Info) : nullptr;
+			if ( Source )
+			{
+				if ( LZMA_PendingGuid != Guid )
+				{
+					Source->Priority++;
+					LZMA_PendingGuid = Guid;
+					LZMA_Timeout     = Connection->Driver->Time + 10.f;
+				}
+
+				// Not finished compressing
+				if ( Source->CompressedSize == 0 )
+					return 1;
+
+				// File too large
+				if( (Connection->Driver->MaxDownloadSize > 0) && (Source->CompressedSize > Connection->Driver->MaxDownloadSize) )
+					break;
+
+				FileToSend = Info.URL + TEXT(" (LZMA Server)");
+				SendFileAr = Source->CreateReader();
+				if ( !SendFileAr ) // Wtf
+				{
+					debugf( NAME_DevNet, TEXT("WTF NO SENDER") );
+					return 1;
+				}
+			}
+			else //oldver
+			{
+				// Get download size
+				INT DownloadSize = GFileManager->FileSize(*Info.URL);
+				if ( (Connection->Driver->MaxDownloadSize > 0) && (DownloadSize > Connection->Driver->MaxDownloadSize) )
+					break;
+
+				appStrncpy( SrcFilename, *Info.URL, ARRAY_COUNT(SrcFilename) );
+				FileToSend = FString::Printf(TEXT("%s.lzma"), SrcFilename);
+				SendFileAr = GFileManager->CreateFileReader( *FileToSend);
+				if ( !SendFileAr )
+				{
+					FileToSend = FString::Printf(TEXT("%s.uz"), SrcFilename);
+					SendFileAr = GFileManager->CreateFileReader( *FileToSend);
+					if ( !SendFileAr )
+					{
+						FileToSend = SrcFilename;
+						SendFileAr = GFileManager->CreateFileReader( SrcFilename);
+					}
+				}
+			}
+
+			// File/memory reader create, start sending,
+			if( SendFileAr )
+			{
+				debugf( NAME_DevNet, LocalizeProgress(TEXT("NetSend"),TEXT("Engine")), *FileToSend );
+				PackageIndex = i;
+				return 1;
+			}
+		}
+	}
+	return 0;
+
+	unguard;
 }
 
 void UXC_FileChannel::Destroy()
