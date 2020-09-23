@@ -66,9 +66,23 @@ static void EncodeCall( uint8* At, uint8* To)
 //***************
 // Hook resources 
 
+template < typename T1, typename T2 > struct TUnion
+{
+	union
+	{
+		T1 Type1;
+		T2 Type2;
+	};
+	TUnion() {}
+	TUnion( T1 InType1) : Type1(InType1) {}
+	TUnion( T2 InType2) : Type2(InType2) {}
+	operator T1&() { return Type1; }
+	operator T2&() { return Type2; }
+};
 
 typedef int (*CompileScripts_Func)( TArray<UClass*>&, class FScriptCompiler_XC*, UClass*);
-static CompileScripts_Func CompileScripts;
+static TUnion<uint8*,CompileScripts_Func> CompileScripts;
+
 static UBOOL CompileScripts_Proxy( TArray<UClass*>& ClassList, FScriptCompiler_XC* Compiler, UClass* Class );
 
 
@@ -77,6 +91,7 @@ class FScriptCompiler_XC : public FScriptCompiler
 public:
 	UField* FindField( UStruct* Owner, const TCHAR* InIdentifier, UClass* FieldClass, const TCHAR* P4);
 };
+typedef UField* (FScriptCompiler_XC::*FindField_Func)( UStruct*, const TCHAR*, UClass*, const TCHAR*);
 
 //TODO: Disassemble Editor.so for more symbols
 // Hook helper
@@ -119,18 +134,9 @@ public:
 static ScriptCompilerHelper_XC_CORE Helper; //Makes C runtime init construct this object
 
 
-
-
-#define ForceAssign(Member,dest) \
-	__asm { \
-		__asm mov eax,Member \
-		__asm lea ecx,dest \
-		__asm mov [ecx],eax }
-
-
 int StaticInitScriptCompiler()
 {
-	if ( !GIsEditor /*|| true*/ ) //Do not setup in v469
+	if ( !GIsEditor )
 		return 0; // Do not setup if game instance
 
 	HMODULE HEditor = GetModuleHandleA("Editor.dll");
@@ -141,21 +147,38 @@ int StaticInitScriptCompiler()
 	GetModuleInformation( GetCurrentProcess(), HEditor, &mInfo, sizeof(MODULEINFO));
 	uint8* EditorBase = (uint8*)mInfo.lpBaseOfDll;
 
+	// Prevent multiple recursion
 	static int Initialized = 0;
 	if ( Initialized++ )
-		return 0; //Prevent multiple recursion
+		return 0; 
 
-//	if ( Initialized != 1337 ) //Disable for now
-//		return 0;
+	constexpr size_t CompileScripts_Offset                = 0x7AD50;
+	constexpr size_t MakeScripts_to_CompileScripts_Offset = 0x8061A;
+	constexpr size_t FindField_Offset                     = 0x7CE20;
 
-	uint8* Tmp;
+	// Get CompileScripts global/static
+	CompileScripts.Type1 = EditorBase + CompileScripts_Offset;
+	if ( CompileScripts.Type1[0] != 0x55 ) // PUSH EBP
+		return 0;
 
-	ForceAssign( CompileScripts_Proxy, Tmp); //Proxy CompileScripts initial call
-	EncodeCall( EditorBase + 0x9A8DD, Tmp);
-	CompileScripts = (CompileScripts_Func)(EditorBase + 0x93E20); //Get CompileScripts global/static
+	// Get call to CompileScripts from UEditorEngine::MakeScripts
+	uint8* MakeScripts_to_CompileScripts = EditorBase + MakeScripts_to_CompileScripts_Offset;
+	if ( MakeScripts_to_CompileScripts[0] != 0xE8 ) // CALL (relative)
+		return 0;
 
-	ForceAssign( FScriptCompiler_XC::FindField, Tmp); //Trampoline FScriptCompiler::FindField into our version
-	EncodeJump( EditorBase + 0x964C0, Tmp);
+	// Get FScriptCompiler::FindField address
+	uint8* FindField = EditorBase + FindField_Offset;
+	if ( FindField[0] != 0x55 ) // PUSH EBP
+		return 0;
+
+	// Proxy CompileScripts initial call
+	EncodeCall( MakeScripts_to_CompileScripts, TUnion<uint8*,CompileScripts_Func>(&CompileScripts_Proxy));
+
+	// Trampoline FScriptCompiler::FindField into our version
+	EncodeJump( FindField, TUnion<uint8*,FindField_Func>(&FScriptCompiler_XC::FindField));
+	TUnion<uint8*,FindField_Func> FindField_XC(&FScriptCompiler_XC::FindField);
+
+	return 1;
 }
 
 
@@ -180,11 +203,11 @@ static UBOOL CompileScripts_Proxy( TArray<UClass*>& ClassList, FScriptCompiler_X
 
 		if ( ImportantClasses.Num() )
 		{
-			Result = (*CompileScripts)(ImportantClasses,Compiler,Class); //UObject
+			Result = (*CompileScripts.Type2)(ImportantClasses,Compiler,Class); //UObject
 			Helper.Reset();
 		}
 		if ( Result )
-			Result = (*CompileScripts)(ClassList,Compiler,Class);
+			Result = (*CompileScripts.Type2)(ClassList,Compiler,Class);
 	}
 	return Result;
 }

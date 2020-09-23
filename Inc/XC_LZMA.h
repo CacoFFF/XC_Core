@@ -84,6 +84,7 @@ class XC_CORE_API ULZMAServer : public USubsystem
 	TCHAR LastError[256];
 
 	// Config
+	UBOOL Silent;
 	INT MaxMemCacheMegs;
 	INT MaxFileCacheMegs;
 	INT ForceSourceToFileMegs;
@@ -106,7 +107,6 @@ class XC_CORE_API ULZMAServer : public USubsystem
 	virtual void AddFileCacheEntry( const TCHAR* CmpFilename, const TCHAR* SrcFilename);
 
 	FLZMASourceBase* GetSource( const FPackageInfo& Info);
-	INT GetCompressedSize( const FPackageInfo& Info, UBOOL AddPriority);
 };
 
 /*-----------------------------------------------------------------------------

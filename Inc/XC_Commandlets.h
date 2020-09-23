@@ -31,15 +31,6 @@ static UBOOL InvalidCharacters( const TCHAR* Stream)
 	return 0;
 }
 
-
-class XC_CORE_API UStripSourceCommandlet : public UCommandlet
-{
-	DECLARE_CLASS(UStripSourceCommandlet,UCommandlet,CLASS_Transient,XC_Core);
-	NO_DEFAULT_CONSTRUCTOR(UStripSourceCommandlet)
-	void StaticConstructor();
-	INT Main( const TCHAR* Parms );
-};
-
 class XC_CORE_API UDeobfuscateNamesCommandlet : public UCommandlet
 {
 	DECLARE_CLASS(UDeobfuscateNamesCommandlet,UCommandlet,CLASS_Transient,XC_Core);
@@ -47,52 +38,6 @@ class XC_CORE_API UDeobfuscateNamesCommandlet : public UCommandlet
 	void StaticConstructor();
 	INT Main( const TCHAR* Parms );
 };
-
-/*-----------------------------------------------------------------------------
-	UStripSourceCommandlet
------------------------------------------------------------------------------*/
-//Move to CPP
-
-void UStripSourceCommandlet::StaticConstructor()
-{
-	IsClient        = 1;
-	IsEditor        = 1;
-	IsServer        = 1;
-	LazyLoad        = 0;
-	ShowErrorCount  = 1;
-}
-INT UStripSourceCommandlet::Main( const TCHAR* Parms )
-{
-	FString PackageName;
-	if( !ParseToken(Parms, PackageName, 0) )
-		appErrorf( TEXT("A .u package file must be specified.") );
-
-	warnf( TEXT("Loading package %s..."), *PackageName );
-	warnf(TEXT(""));
-	UObject* Package = LoadPackage( NULL, *PackageName, LOAD_NoWarn );
-	if( !Package )
-		appErrorf( TEXT("Unable to load %s"), *PackageName );
-
-
-	for( TObjectIterator<UClass> It; It; ++It )
-	{
-		if( It->GetOuter() == Package && It->ScriptText )
-		{
-			warnf( TEXT("  Stripping source code from class %s"), It->GetName() );
-			It->ScriptText->Text = FString(TEXT(" "));
-			It->ScriptText->Pos = 0;
-			It->ScriptText->Top = 0;
-		}
-	}
-
-	warnf(TEXT(""));
-	warnf(TEXT("Saving %s..."), *PackageName );
-	SavePackage( Package, NULL, RF_Standalone, *PackageName, GWarn );
-
-	GIsRequestingExit=1;
-	return 0;
-}
-IMPLEMENT_CLASS(UStripSourceCommandlet)
 
 
 /*-----------------------------------------------------------------------------

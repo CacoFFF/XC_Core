@@ -44,12 +44,6 @@ static INT lzma_threads = 1;
 typedef int (STDCALL *XCFN_LZMA_Uncompress) (unsigned char *dest, size_t *destLen, const unsigned char *src, SizeT *srcLen,
   const unsigned char *props, size_t propsSize);
 
-#ifdef _MSC_VER
-	static HMODULE hLZMA = 0;
-#elif __LINUX_X86__
-	static void* hLZMA = 0;
-#endif
-
 static CScopedLibrary LZMA;
 static XCFN_LZMA_Compress LzmaCompressFunc = 0;
 static XCFN_LZMA_Uncompress LzmaDecompressFunc = 0;
@@ -521,17 +515,20 @@ void ULZMAServer::StaticConstructor()
 	UClass* Class = GetClass();
 	ULZMAServer* Defaults = (ULZMAServer*)&Class->Defaults(0);
 
-	Defaults->MaxMemCacheMegs       = 16;
+	Defaults->Silent                =   1;
+	Defaults->MaxMemCacheMegs       =  16;
 	Defaults->MaxFileCacheMegs      = 256;
-	Defaults->ForceSourceToFileMegs = 24;
+	Defaults->ForceSourceToFileMegs =   8;
 
 	// Get these to LzmaCache.ini
+	new(Class,TEXT("Silent")               , RF_Public) UBoolProperty( CPP_PROPERTY(Silent)              , TEXT("Settings"), CPF_Native|CPF_Edit);
 	new(Class,TEXT("MaxMemCacheMegs")      , RF_Public) UIntProperty( CPP_PROPERTY(MaxMemCacheMegs)      , TEXT("Settings"), CPF_Native|CPF_Edit);
 	new(Class,TEXT("MaxFileCacheMegs")     , RF_Public) UIntProperty( CPP_PROPERTY(MaxFileCacheMegs)     , TEXT("Settings"), CPF_Native|CPF_Edit);
 	new(Class,TEXT("ForceSourceToFileMegs"), RF_Public) UIntProperty( CPP_PROPERTY(ForceSourceToFileMegs), TEXT("Settings"), CPF_Native|CPF_Edit);
 
 	// Status
 	new(Class,TEXT("bPendingRelocation"),RF_Public) UBoolProperty( CPP_PROPERTY(bPendingRelocation),TEXT("LZMAServer"), CPF_Transient|CPF_Edit);
+	new(Class,TEXT("bProcessingMap")    ,RF_Public) UBoolProperty( CPP_PROPERTY(bProcessingMap)    ,TEXT("LZMAServer"), CPF_Transient|CPF_Const|CPF_EditConst);
 	new(Class,TEXT("LastUpdated"),RF_Public) UFloatProperty( CPP_PROPERTY(LastUpdated),TEXT("LZMAServer"), CPF_Transient|CPF_Edit);
 }
 
@@ -570,6 +567,12 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 
 	LastUpdated += DeltaTime;
 
+	if ( LastError[0] != '\0' )
+	{
+		GWarn->Log( NAME_LZMAServer, LastError);
+		LastError[0] = '\0';
+	}
+
 	CThread*& Thread = (CThread*&)ThreadPtr;
 
 	// Cleanup finished thread
@@ -577,6 +580,7 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 	{
 		AsyncKey = nullptr;
 		AsyncLock.Release();
+		Thread->Detach();
 		delete Thread;
 		Thread = nullptr;
 	}
@@ -621,7 +625,8 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 			if ( (ForceSourceToFileMegs > 0) && (Sources(i)->OriginalSize / (1024*1024) >= ForceSourceToFileMegs) )
 			{
 				// Directly save to file
-				debugf( NAME_LZMAServer, TEXT("Pushing package to file cache (size limit)") );
+				if ( !Silent )
+					debugf( NAME_LZMAServer, TEXT("Pushing package to file cache (size limit)") );
 				FLZMASourceFile* SourceFile = new FLZMASourceFile( *Sources(i), AsyncCompressedData);
 				if ( SourceFile->State == CS_STATE_Ready )
 					AddFileCacheEntry( *SourceFile->CmpFilename, *SourceFile->Filename);
@@ -686,10 +691,11 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 	bPendingRelocation = false;
 
 	// Nothing was selected, no more updates need to be pushed
-	if ( PrioritySelect == INDEX_NONE )
+	if ( !Sources.IsValidIndex(PrioritySelect) )
 	{
 		bProcessingMap = false;
-		debugf( NAME_LZMAServer, TEXT("All sources processed (%i)"), Sources.Num() );
+		if ( Sources.Num() && !Silent )
+			debugf( NAME_LZMAServer, TEXT("All sources processed (%i)"), Sources.Num() );
 		return;
 	}
 
@@ -711,7 +717,8 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 	AsyncCompressedData = nullptr;
 	AsyncCompressedSize = 0;
 	LastUpdated = 0;
-	debugf( NAME_LZMAServer, TEXT("Autocompressing package %s"), *Sources(PrioritySelect)->Filename);
+	if ( !Silent )
+		debugf( NAME_LZMAServer, TEXT("Autocompressing package %s"), *Sources(PrioritySelect)->Filename);
 
 	// Create compressor if required
 	if ( !Thread )
@@ -726,32 +733,31 @@ void ULZMAServer::Tick(FLOAT DeltaTime)
 			try
 			{
 				// Safety stops
-				if ( (Server->ThreadPtr != Handler) || (Server->AsyncSource == INDEX_NONE) )
+				int32 i = Server->AsyncSource;
+				if ( (Server->ThreadPtr != Handler) || !Server->Sources.IsValidIndex(i) )
 					return THREAD_END_NOT_OK;
 
 				Server->AsyncLock.Acquire();
 				Server->AsyncKey = &Key;
 				void*  Data;
 				size_t Size;
-				Server->Sources(Server->AsyncSource)->State = CS_STATE_Compressing;
+				Server->Sources(i)->State = CS_STATE_Compressing;
 				LzmaCompress( Server->AsyncReader, Data, Size, Error);
-
-				if ( Error[0] )
-					GLog->Log(Error);
 
 				// Server not available after compression ended
 				// Or thread timed out and server replaced it
-				if ( GIsRequestingExit || !Key || (Server->GetFlags() & RF_Destroyed) || (Server->AsyncSource == INDEX_NONE) || (Server->ThreadPtr != Handler) )
+				if ( GIsRequestingExit || !Key || (Server->GetFlags() & RF_Destroyed) || (Server->AsyncSource != i) || (Server->ThreadPtr != Handler) )
 				{
 					if ( Data )
 						free(Data);
 					return THREAD_END_OK;
 				}
 
+				appStrcpy( Server->LastError, Error);
 				Server->AsyncCompressedData = Data;
 				Server->AsyncCompressedSize = Size;
 				if ( !Data )
-					Server->Sources(Server->AsyncSource)->State = CS_STATE_NoSource;
+					Server->Sources(i)->State = CS_STATE_NoSource;
 				Server->LastUpdated = 0;
 			}
 			catch(...)
@@ -798,6 +804,8 @@ void ULZMAServer::Init()
 	GFileManager->MakeDirectory( LZMA_CACHE_PATH);
 
 	guard(Server);
+	if ( !LzmaCacheIni.GetBool( TEXT("Server"), TEXT("Silent"), Silent, LZMA_CACHE_INI) )
+		LzmaCacheIni.SetBool( TEXT("Server"), TEXT("Silent"), Silent, LZMA_CACHE_INI);
 	if ( !LzmaCacheIni.GetInt( TEXT("Server"), TEXT("MaxMemCacheMegs"), MaxMemCacheMegs, LZMA_CACHE_INI) )
 		LzmaCacheIni.SetInt( TEXT("Server"), TEXT("MaxMemCacheMegs"), MaxMemCacheMegs, LZMA_CACHE_INI);
 	if ( !LzmaCacheIni.GetInt( TEXT("Server"), TEXT("MaxFileCacheMegs"), MaxFileCacheMegs, LZMA_CACHE_INI) )
@@ -865,6 +873,9 @@ void ULZMAServer::UpdatePackageMap( UPackageMap* NewPackageMap)
 	// Enumerate existing packages to be pushed
 	if ( NewPackageMap )
 	{
+		FConfigCacheIni LzmaCacheIni;
+		TMultiMap<FString,FString>* Section = LzmaCacheIni.GetSectionPrivate( TEXT("LzmaCache"), 1, 0, LZMA_CACHE_INI );
+
 		bool bCanCompress = GetHandles();
 		for ( TArray<FPackageInfo>::TIterator It(NewPackageMap->List); It; ++It)
 			if ( !IsDefaultPackage(*It->Linker->Filename) && (It->PackageFlags & PKG_AllowDownload) )
@@ -878,6 +889,17 @@ void ULZMAServer::UpdatePackageMap( UPackageMap* NewPackageMap)
 						OldVerSource = GetOldCompressedFile(*It,TEXT(".uz"));
 					if ( OldVerSource.Len() )
 						Source = new FLZMASourceFile(*It,*OldVerSource);
+
+					// Locate in LZMA cache
+					if ( Section && !Source )
+					{
+						for ( TMultiMap<FString,FString>::TIterator CIt(*Section); CIt; ++CIt)
+							if ( CIt.Value() == *It->Linker->Filename )
+							{
+								Source = new FLZMASourceFile(*It,*CIt.Key());
+								break;
+							}
+					}
 
 					// If no existing source was found, queue for compression
 					if ( bCanCompress && !Source )
@@ -941,7 +963,8 @@ void ULZMAServer::RelocateSources( UBOOL bCleanupDisk)
 		if ( SourceFile->State == CS_STATE_Ready )
 		{
 			AddFileCacheEntry( *SourceFile->CmpFilename, *SourceFile->Filename);
-			debugf( NAME_LZMAServer, TEXT("Pushing cache to file [%s] -> [%s]"), *SourceFile->Filename, *SourceFile->CmpFilename);
+			if ( !Silent )
+				debugf( NAME_LZMAServer, TEXT("Pushing cache to file [%s] -> [%s]"), *SourceFile->Filename, *SourceFile->CmpFilename);
 			delete Sources(MaxSelect);
 			Sources(MaxSelect) = SourceFile;
 		}
@@ -956,10 +979,7 @@ void ULZMAServer::RelocateSources( UBOOL bCleanupDisk)
 		{
 			FString FileSource = Sources(i)->GetCompressedFile();
 			if ( FileSource.Len() > 0 )
-			{
-				new(LockedSources) FString();
-				ExchangeRaw( LockedSources.Last(), FileSource);
-			}
+				new(LockedSources) FString(FileSource);
 		}
 
 		// Enumerate all cache sources
@@ -996,7 +1016,8 @@ void ULZMAServer::RelocateSources( UBOOL bCleanupDisk)
 					Purged++;
 				}
 			}
-			debugf( NAME_LZMAServer, TEXT("Purged %i files from LZMA cache"), Purged );
+			if ( Purged && !Silent )
+				debugf( NAME_LZMAServer, TEXT("Purged %i files from LZMA cache"), Purged );
 		}
 	}
 
@@ -1030,52 +1051,12 @@ FLZMASourceBase* ULZMAServer::GetSource( const FPackageInfo& Info)
 	return nullptr;
 }
 
-INT ULZMAServer::GetCompressedSize( const FPackageInfo& Info, UBOOL AddPriority)
-{
-	for ( int32 i=0; i<Sources.Num(); i++)
-		if ( (Sources(i)->Guid == Info.Guid) && (Sources(i)->Filename == Info.Linker->Filename) )
-		{
-			if ( AddPriority && !Sources(i)->CompressedSize )
-				Sources(i)->Priority += AddPriority;
-			return Sources(i)->CompressedSize;
-		}
-	return 0;
-}
-
 IMPLEMENT_CLASS(ULZMAServer);
 
 /*-----------------------------------------------------------------------------
 	LZMA Unreal externals
 -----------------------------------------------------------------------------*/
 
-
-//
-// Thread safe memory allocator/deallocator that doesn't throw exceptions upon failure
-//
-template < typename T > class FScopedMemoryANSI
-{
-private:
-	void*  Mem;
-
-public:
-	int32  Size;
-
-	FScopedMemoryANSI( int32 InSize)
-		: Mem( malloc((size_t)InSize) )
-		, Size(InSize)
-	{}
-
-	~FScopedMemoryANSI()
-	{
-		if ( Mem )
-			delete Mem;
-	}
-
-	T* Data()
-	{
-		return (T*)Mem;
-	}
-};
 
 XC_CORE_API UBOOL LzmaCompress( const TCHAR* Src, const TCHAR* Dest, TCHAR* Error)
 {
@@ -1086,7 +1067,7 @@ XC_CORE_API UBOOL LzmaCompress( const TCHAR* Src, const TCHAR* Dest, TCHAR* Erro
 	FArchive* SrcFile = GFileManager->CreateFileReader( Src, 0);
 	if ( SrcFile )
 	{
-		if ( SrcFile->TotalSize() <= 0 )
+		if ( SrcFile->TotalSize() > 0 )
 		{
 			void*  CompressedData;
 			size_t CompressedSize;
@@ -1101,14 +1082,14 @@ XC_CORE_API UBOOL LzmaCompress( const TCHAR* Src, const TCHAR* Dest, TCHAR* Erro
 					DestFile->Close();
 					delete DestFile;
 				}
-				else appSprintf( TEXT("Unable to create destination file %s."), Dest);
+				else appSprintf( Error, TEXT("Unable to create destination file %s."), Dest);
 				free(CompressedData);
 			}
 		}
-		else appSprintf( TEXT("Empty file %s"), Src);
+		else appSprintf( Error, TEXT("Empty file %s"), Src);
 		delete SrcFile;
 	}
-	else appSprintf( TEXT("Unable to load file %s"), Src);
+	else appSprintf( Error, TEXT("Unable to load file %s"), Src);
 	return Result;
 }
 

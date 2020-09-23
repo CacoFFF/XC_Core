@@ -42,6 +42,7 @@ you need and add the proper macros and definitions in your own private header
 // Unreal engine includes.
 //#include "Engine.h"
 
+#define XC_CORE_VERSION 11
 
 #include "Core.h"
 #include "Cacus/CacusPlatform.h"

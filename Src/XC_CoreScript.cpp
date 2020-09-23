@@ -128,6 +128,7 @@ INT DummyFixNames()
 //*************************************************
 XC_CORE_API void XCCNatives( UBOOL bEnable)
 {
+	GetDefault<UXC_CoreStatics>()->XC_Core_Version = XC_CORE_VERSION;
 	if ( bEnable )
 	{
 		GetDefault<UXC_CoreStatics>()->bGNatives = true;
@@ -212,7 +213,7 @@ void UXC_CoreStatics::StaticConstructor()
 
 	RegisterNames();
 
-	DefaultObject->XC_Core_Version = 11;
+	DefaultObject->XC_Core_Version = XC_CORE_VERSION;
 	StaticInitScriptCompiler();
 	unguard;
 }
@@ -930,7 +931,6 @@ void UBinarySerializer::Destroy()
 
 IMPLEMENT_CLASS(UBinarySerializer);
 
-#undef ARCHIVE_440
 /*-----------------------------------------------------------------------------
 	The End.
 -----------------------------------------------------------------------------*/
