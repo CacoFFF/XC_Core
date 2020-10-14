@@ -106,7 +106,7 @@ event MapRouteEvent_3( Pawn Seeker, array<NavigationPoint> StartAnchors);
 //Editor-only
 native static final function Mesh BrushToMesh( Actor Brush, name InPkg, name InName, optional int InFlags);
 native static final function string CleanupLevel( Level Level);
-native static final function string PathsRebuild( Level Level, optional Pawn ScoutReference, optional bool bBuildAir);
+native static final function string PathsRebuild( Level Level, optional Pawn ScoutReference, optional int BuildFlags, optional float MaxDistance);
 
 //For use with subclasses
 static function string StaticCall( string Code);

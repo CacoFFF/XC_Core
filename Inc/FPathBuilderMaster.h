@@ -23,6 +23,12 @@ private:
 };
 
 
+enum EPathBuilderFlags
+{
+	PB_BuildAir      = 0x01,
+	PB_BuildSelected = 0x02,
+};
+
 class XC_CORE_API FPathBuilderMaster : public FPathBuilder
 {
 public:
@@ -31,7 +37,7 @@ public:
 	float                    GoodRadius;
 	float                    GoodJumpZ;
 	float                    GoodGroundSpeed;
-	int32                    Aerial;
+	uint32                   BuildFlags;
 	UClass*                  InventorySpotClass;
 	UClass*                  WarpZoneMarkerClass;
 	int32                    TotalCandidates;

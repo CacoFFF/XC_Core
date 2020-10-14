@@ -18,7 +18,7 @@ XC_CORE_API UProperty* FindScriptVariable( UStruct* InStruct, const TCHAR* PropN
 XC_CORE_API void SortStringsA( TArray<FString>* List);
 XC_CORE_API void SortStringsSA( FString* List, INT ArrayMax);
 
-XC_CORE_API FString PathsRebuild( class ULevel* Level, class APawn* ScoutReference, UBOOL bBuildAir);
+XC_CORE_API FString PathsRebuild( class ULevel* Level, class APawn* ScoutReference, DWORD BuildFlags, FLOAT MaxDistance);
 
 XC_CORE_API FPackageFileSummary LoadPackageSummary( const TCHAR* File);
 

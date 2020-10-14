@@ -217,7 +217,7 @@ typedef TUpwardsSortableLinkedRef<FPathBuilderInfo> TPathInfoLink;
 //
 
 
-FString PathsRebuild( ULevel* Level, APawn* ScoutReference, UBOOL bBuildAir)
+FString PathsRebuild( ULevel* Level, APawn* ScoutReference, DWORD BuildFlags, FLOAT MaxDistance)
 {
 	FPathBuilderMaster Builder;
 	if ( ScoutReference )
@@ -227,8 +227,10 @@ FString PathsRebuild( ULevel* Level, APawn* ScoutReference, UBOOL bBuildAir)
 		Builder.GoodJumpZ       = ScoutReference->JumpZ;
 		Builder.GoodGroundSpeed = ScoutReference->GroundSpeed;
 	}
+	if ( MaxDistance > 0 )
+		Builder.GoodDistance = MaxDistance * 0.5;
 	Builder.Level = Level;
-	Builder.Aerial = bBuildAir;
+	Builder.BuildFlags = BuildFlags;
 	Builder.RebuildPaths();
 	return Builder.BuildResult;
 }
@@ -346,8 +348,11 @@ inline void FPathBuilderMaster::DefinePaths()
 
 	// Setup initial list
 	for ( int32 i=0 ; i<Level->Actors.Num() ; i++ )
-		if ( Level->Actors(i) && Level->Actors(i)->IsA(ANavigationPoint::StaticClass()) )
-			RegisterInfo( (ANavigationPoint*)Level->Actors(i));
+	{
+		ANavigationPoint* N = Cast<ANavigationPoint>(Level->Actors(i));
+		if ( N && (!(BuildFlags & PB_BuildSelected) || N->bSelected) )
+			RegisterInfo(N);
+	}
 
 	AddMarkers();
 	DefineSpecials();
@@ -408,7 +413,7 @@ inline void FPathBuilderMaster::AddMarkers()
 	for ( i=0 ; i<Level->Actors.Num() ; i++ )
 	{
 		AInventory* Actor = Cast<AInventory>( Level->Actors(i));
-		if ( Actor )
+		if ( Actor && (!(BuildFlags & PB_BuildSelected) || Actor->bSelected) )
 			HandleInventory( Actor);
 	}
 
@@ -416,7 +421,7 @@ inline void FPathBuilderMaster::AddMarkers()
 	for ( i=0 ; i<Level->Actors.Num() ; i++ )
 	{
 		AWarpZoneInfo* Actor = Cast<AWarpZoneInfo>( Level->Actors(i));
-		if ( Actor )
+		if ( Actor && (!(BuildFlags & PB_BuildSelected) || Actor->bSelected) )
 			HandleWarpZone( Actor);
 	}
 	// TODO: Add custom markers
@@ -514,7 +519,7 @@ inline void FPathBuilderMaster::BuildCandidatesLists()
 	debugf( NAME_DevPath, TEXT("Building candidates lists..."));
 	float MaxDistSq = GoodDistance * GoodDistance * 2 * 2;
 
-	uint32 MaxPossiblePairs = InfoList.Num() * InfoList.Num() / 2;
+	uint64 MaxPossiblePairs = (uint64)InfoList.Num() * (uint64)InfoList.Num() / 2;
 
 	for ( int32 i=0 ; i<InfoList.Num() ; i++ )
 	{
@@ -533,8 +538,8 @@ inline void FPathBuilderMaster::BuildCandidatesLists()
 			if ( !Level->Model->FastLineCheck( InfoList(i).Owner->Location, InfoList(j).Owner->Location) ) 
 				continue; //Not visible
 
-			uint32 CurrentPair = (InfoList.Num() * 2 - i) * i / 2 + j - i;
-			GWarn->StatusUpdatef( CurrentPair, MaxPossiblePairs, TEXT("Building candidates lists (%i/%i)"), CurrentPair, MaxPossiblePairs);
+			uint64 CurrentPair = (uint64)(InfoList.Num() * 2 - i) * i / 2 + j - i;
+			GWarn->StatusUpdatef( CurrentPair >> 4, MaxPossiblePairs >> 4, TEXT("Building candidates lists (%i/%i)"), (int32)CurrentPair, (int32)MaxPossiblePairs);
 				
 			int32 k = 0;
 			while ( (k < InfoList(i).Candidates.Num()) && (InfoList(i).Candidates(k).DistSq < DistSq) )
@@ -696,6 +701,28 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 		if ( A->bOneWayPath && (((B->Location - A->Location) | A->Rotation.Vector()) <= 0) )
 			continue;
 
+		// Count A-outgoing and B-incoming paths and try to precalculate spec
+		FReachSpec NewSpec;
+		NewSpec.Start = nullptr;
+		NewSpec.End = nullptr;
+		NewSpec.CollisionRadius = 0;
+		NewSpec.CollisionHeight = 0;
+		NewSpec.reachFlags = 0xFFFFFFFF;
+		NewSpec.distance = 99999;
+		INT FilterRadius = 0;
+		INT FilterHeight = 0;
+		INT OutPaths = CountPaths(A->Paths);
+		INT InPaths = CountPaths(B->upstreamPaths);
+		if ( (OutPaths < 8) && (InPaths < 8) )
+		{
+			NewSpec = CreateSpec( A, B);
+			// Failed to create reachSpec, no need to prune-check
+			if ( !NewSpec.Start || !NewSpec.End )
+				continue;
+			FilterRadius = /*Min(*/NewSpec.CollisionRadius * 50 / (50+OutPaths+InPaths)/*, Min(appRound(GoodRadius),60) )*/;
+			FilterHeight = /*Min(*/NewSpec.CollisionHeight * 50 / (50+OutPaths+InPaths)/*, Min(appRound(GoodHeight),60) )*/;
+		}
+
 		//Evaluate pruning first
 		int32 Prune = 0;
 		if ( MiddleCount )
@@ -725,6 +752,14 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 						continue;
 					}
 					const FReachSpec& Spec = Level->ReachSpecs(Start->Paths[j]);
+					constexpr INT R_RELEVANT = (R_WALK|R_FLY|R_SWIM);
+//					debugf( TEXT("Filter %i=(%i,%i) vs (%i,%i)"), rIdx, Spec.CollisionRadius, Spec.CollisionHeight, FilterRadius, FilterHeight);
+					if	(	(Spec.CollisionRadius < 45 || Spec.CollisionHeight < 55) // Only filter small reachspecs
+						&&	(	Spec.CollisionHeight < FilterHeight // New spec is taller
+							||	Spec.CollisionRadius < FilterRadius // New spec is wider
+							||	(Spec.reachFlags & NewSpec.reachFlags & R_RELEVANT) != (Spec.reachFlags & R_RELEVANT)) ) // New spec has less requirements
+						continue;
+
 					ANavigationPoint* End = (ANavigationPoint*)Spec.End;
 					//CUT HERE!!
 					if ( End == B ) //Connection exists!
@@ -734,7 +769,7 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 						break;
 					}
 					int32 CurWeight = Max( 1, Spec.distance) + Start->visitedWeight;
-					if ( End->bestPathWeight && (End->visitedWeight > CurWeight) )
+					if ( End->bestPathWeight && (End->visitedWeight > CurWeight) /*&& (CurWeight < NewSpec.distance*2) */)
 					{
 						End->visitedWeight = CurWeight;
 						if ( (End->OtherTag == FINISHED_QUERY) && (i > 0)  ) //Already queried during this route
@@ -757,9 +792,11 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 
 		if ( !Prune )
 		{
-			FReachSpec Spec = CreateSpec( A, B);
-			if ( Spec.Start && Spec.End )
-				AttachReachSpec( Spec);
+			// Define reachSpec if not predefined before
+			if ( !NewSpec.Start )
+				NewSpec = CreateSpec( A, B);
+			if ( NewSpec.Start && NewSpec.End )
+				AttachReachSpec( NewSpec);
 			else
 			{
 				for ( i=0 ; i<16 ; i++ )
@@ -804,22 +841,44 @@ inline FReachSpec FPathBuilderMaster::CreateSpec( ANavigationPoint* Start, ANavi
 	FVector Fat = End->Location - Start->Location;
 	if ( (Fat.SizeSquared2D() <= Square(129.0)) && Square(Fat.Z) < Square(60) )
 	{
-		Scout->SetCollisionSize( Fat.Size2D() + 5, GoodHeight + Abs(Fat.Z) * 0.5);
-		CHECK_SCOUT_HASH;
-		if ( FindStart(Start->Location + Fat * 0.5) && ActorsTouching(Scout,End) && ActorsTouching(Scout,Start) )
+		FLOAT TryRadius = Max(Max(60.f,GoodRadius),Fat.Size2D()+5);
+		FLOAT TryHeight = Max(60.f,GoodHeight)+Abs(Fat.Z)*0.5;
+		while ( !Reachable && (TryRadius >= GoodRadius) && (TryHeight >= GoodHeight) )
 		{
-			Spec.CollisionRadius = Max( Spec.CollisionRadius, appRound(Scout->CollisionRadius) + 2);
-			Spec.CollisionHeight = Max( Spec.CollisionHeight, appRound(Scout->CollisionHeight) + 2);
-			Scout->SetCollisionSize( GoodRadius, GoodHeight);
-			CHECK_SCOUT_HASH;
-			int Walkables = FindStart(Start->Location) + FindStart(End->Location);
-			if ( Walkables >= 2 )
+			INT Found = 0;
+			FVector Center = Start->Location + Fat * 0.5;
+			Scout->SetCollisionSize( TryRadius, TryHeight);
+			Found = FindStart(Center);
+			// Try thinner
+			if ( !Found && (TryRadius * 0.8 >= GoodRadius) )
 			{
-				Reachable = 1;
-				Spec.reachFlags |= R_WALK;
-				Spec.distance = appRound(Fat.Size());
+				Scout->SetCollisionSize( TryRadius * 0.8, TryHeight);
+				Found = FindStart(Center);
 			}
-//			debugf( NAME_DevNet, L"FAT %f -> %i", Fat.Size2D(), Walkables ); 
+			// Try shorter
+			if ( !Found && (TryHeight * 0.8 >= GoodHeight) )
+			{
+				Scout->SetCollisionSize( TryRadius, TryHeight * 0.8);
+				Found = FindStart(Center);
+			}
+			CHECK_SCOUT_HASH;
+
+			if ( Found && ActorsTouching(Scout,End) && ActorsTouching(Scout,Start) )
+			{
+				Spec.CollisionRadius = Max( Spec.CollisionRadius, appRound(Scout->CollisionRadius) + 2);
+				Spec.CollisionHeight = Max( Spec.CollisionHeight, appRound(Scout->CollisionHeight) + 2);
+				Scout->SetCollisionSize( GoodRadius, GoodHeight);
+				CHECK_SCOUT_HASH;
+				if ( FindStart(Start->Location) && FindStart(End->Location) )
+				{
+					Reachable = 1;
+					Spec.reachFlags |= R_WALK;
+					Spec.distance = appRound(Fat.Size());
+				}
+//				debugf( NAME_DevNet, L"FAT %f -> %i", Fat.Size2D(), Walkables ); 
+			}
+			TryRadius = TryRadius * 0.95 - 1;
+			TryHeight = TryHeight * 0.95 - 1;
 		}
 	}
 
@@ -861,7 +920,7 @@ inline FReachSpec FPathBuilderMaster::CreateSpec( ANavigationPoint* Start, ANavi
 		Spec.reachFlags |= Reachable;
 	}
 
-	if ( Aerial && !Reachable )
+	if ( (BuildFlags & PB_BuildAir) && !Reachable )
 	{
 		Scout->MaxStepHeight = 25;
 		Scout->bCanFly = 1;
@@ -1188,20 +1247,28 @@ inline void FPathBuilderMaster::HandleInventory( AInventory* Inv)
 	if ( Inv->bHiddenEd || Inv->myMarker || Inv->bDeleteMe )
 		return;
 
-	//Adjust Scout using player dims
-	Scout->SetCollisionSize( GoodRadius, GoodHeight);
+	//Adjust Scout using player + item size dims (pushout from wall)
+	FLOAT ExtraRadius = (Inv->CollisionRadius + appSqrt(Inv->CollisionRadius/20) * 20) * 0.5;
+	FLOAT ExtraHeight = appSqrt(Inv->CollisionHeight/10) * 2;
+	Scout->SetCollisionSize( GoodRadius+ExtraRadius, GoodHeight+ExtraHeight);
 	CHECK_SCOUT_HASH;
-
-	//Attempt to stand at item
-	if ( !FindStart(Inv->Location) 
+	if ( !FindStart(Inv->Location)  //Attempt to stand at item
 		|| (Abs(Scout->Location.Z - Inv->Location.Z) > Scout->CollisionHeight) 
 		|| (Scout->Location-Inv->Location).SizeSquared2D() > Square(Scout->CollisionRadius+Inv->CollisionRadius) )
 	{
-		//Failed, attempt to move towards item from elsewhere
-		if ( !TraverseTo( Scout, Inv, GoodDistance * 0.5, 0) || !TraverseTo( Scout, Inv, GoodDistance * 1.5, 1) )
+		//Adjust Scout using player dims
+		Scout->SetCollisionSize( GoodRadius, GoodHeight);
+		CHECK_SCOUT_HASH;
+		if ( !FindStart(Inv->Location) //Attempt to stand at item
+			|| (Abs(Scout->Location.Z - Inv->Location.Z) > Scout->CollisionHeight) 
+			|| (Scout->Location-Inv->Location).SizeSquared2D() > Square(Scout->CollisionRadius+Inv->CollisionRadius) )
 		{
-			//Failed, just place above item
-			Level->FarMoveActor(Scout, Inv->Location + FVector(0,0,GoodHeight-Inv->CollisionHeight), 1, 1);
+			//Failed, attempt to move towards item from elsewhere
+			if ( !TraverseTo( Scout, Inv, GoodDistance * 0.5, 0) || !TraverseTo( Scout, Inv, GoodDistance * 1.5, 1) )
+			{
+				//Failed, just place above item
+				Level->FarMoveActor(Scout, Inv->Location + FVector(0,0,GoodHeight-Inv->CollisionHeight), 1, 1);
+			}
 		}
 	}
 

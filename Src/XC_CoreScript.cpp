@@ -645,9 +645,10 @@ void UXC_CoreStatics::execPathsRebuild( FFrame& Stack, RESULT_DECL )
 {
 	P_GET_OBJECT( ULevel, Level);
 	P_GET_PAWN_OPTX( ScoutReference, NULL);
-	P_GET_UBOOL_OPTX( bBuildAir, 0);
+	P_GET_INT_OPTX( BuildFlags, 0);
+	P_GET_FLOAT_OPTX( MaxDistance, 0);
 	P_FINISH;
-	*(FString*)Result = Level ? PathsRebuild(Level,ScoutReference,bBuildAir) : FString();
+	*(FString*)Result = Level ? PathsRebuild(Level,ScoutReference,BuildFlags,MaxDistance) : FString();
 }
 IMPLEMENT_CLASS(UXC_CoreStatics);
 
