@@ -709,8 +709,6 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 		NewSpec.CollisionHeight = 0;
 		NewSpec.reachFlags = 0xFFFFFFFF;
 		NewSpec.distance = 99999;
-		INT FilterRadius = 0;
-		INT FilterHeight = 0;
 		INT OutPaths = CountPaths(A->Paths);
 		INT InPaths = CountPaths(B->upstreamPaths);
 		if ( (OutPaths < 8) && (InPaths < 8) )
@@ -719,8 +717,6 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 			// Failed to create reachSpec, no need to prune-check
 			if ( !NewSpec.Start || !NewSpec.End )
 				continue;
-			FilterRadius = /*Min(*/NewSpec.CollisionRadius * 50 / (50+OutPaths+InPaths)/*, Min(appRound(GoodRadius),60) )*/;
-			FilterHeight = /*Min(*/NewSpec.CollisionHeight * 50 / (50+OutPaths+InPaths)/*, Min(appRound(GoodHeight),60) )*/;
 		}
 
 		//Evaluate pruning first
@@ -752,11 +748,16 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 						continue;
 					}
 					const FReachSpec& Spec = Level->ReachSpecs(Start->Paths[j]);
+
+					// Examine this section of the route, if the reachSpec is significantly smaller
+					// or has a different locomotion method, then do not consider as valid route
+					// This will reduce the chances of the path being pruned.
 					constexpr INT R_RELEVANT = (R_WALK|R_FLY|R_SWIM);
-//					debugf( TEXT("Filter %i=(%i,%i) vs (%i,%i)"), rIdx, Spec.CollisionRadius, Spec.CollisionHeight, FilterRadius, FilterHeight);
-					if	(	(Spec.CollisionRadius < 45 || Spec.CollisionHeight < 55) // Only filter small reachspecs
-						&&	(	Spec.CollisionHeight < FilterHeight // New spec is taller
-							||	Spec.CollisionRadius < FilterRadius // New spec is wider
+					if	(	(NewSpec.reachFlags != 0xFFFFFFFF) // New spec has been defined
+						&&	!(Spec.reachFlags & R_SPECIAL) // R_SPECIAL reachSpecs are always part of the route
+						&&	(Spec.CollisionRadius < 60 || Spec.CollisionHeight < 60) // Only filter small reachspecs
+						&&	(	Spec.CollisionHeight < NewSpec.CollisionHeight // New spec is taller
+							||	Spec.CollisionRadius < NewSpec.CollisionRadius // New spec is wider
 							||	(Spec.reachFlags & NewSpec.reachFlags & R_RELEVANT) != (Spec.reachFlags & R_RELEVANT)) ) // New spec has less requirements
 						continue;
 
@@ -805,6 +806,15 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 						A->VisNoReachPaths[i] = B;
 						break;
 					}
+			}
+		}
+		else if ( NewSpec.Start )
+		{
+			// Let's add to prune list
+			if ( CountPaths(A->PrunedPaths) < 8 )
+			{
+				NewSpec.bPruned = 1;
+				AttachReachSpec(NewSpec);
 			}
 		}
 	}
