@@ -839,7 +839,8 @@ void ULZMAServer::Init()
 				continue;
 			}
 		}
-		GFileManager->Delete(**It);
+		FString Filename = FString::Printf( LZMA_CACHE_PATH TEXT("%s"), **It);
+		GFileManager->Delete(*Filename);
 	}
 	for ( TMultiMap<FString,FString>::TIterator It(*Section); It; ++It)
 		if ( !SectionUpdate.Find(It.Key()) )
