@@ -27,6 +27,7 @@ enum EPathBuilderFlags
 {
 	PB_BuildAir      = 0x01,
 	PB_BuildSelected = 0x02,
+	PB_FastPrune     = 0x04,
 };
 
 class XC_CORE_API FPathBuilderMaster : public FPathBuilder

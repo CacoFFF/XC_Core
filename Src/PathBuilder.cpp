@@ -745,7 +745,8 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 					// This will reduce the chances of the path being pruned.
 					constexpr INT R_RELEVANT = (R_WALK|R_FLY|R_SWIM);
 					// Stop prune if segment...
-					if	(	!(Spec.reachFlags & R_SPECIAL) // ...does not require special locomotion (R_SPECIAL always allows pruning)
+					if	(	!(BuildFlags & PB_FastPrune)
+						&&	!(Spec.reachFlags & R_SPECIAL) // ...does not require special locomotion (R_SPECIAL always allows pruning)
 						&&	(Spec.CollisionRadius < 60 || Spec.CollisionHeight < 60) ) // ...only allows smaller pawns.
 					{
 						// On-demand define the new reachSpec
