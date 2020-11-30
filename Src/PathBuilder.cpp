@@ -756,6 +756,7 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 							if ( !NewSpec.Start || !NewSpec.End )
 							{
 								i = k;
+								Prune = 1;
 								break;
 							}
 						}
@@ -767,35 +768,38 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 							FVector RelativeSegment = NewSpec.End->Location - NewSpec.Start->Location;
 							FLOAT SizeSq = RelativeSegment.SizeSquared();
 
-							int32 ProjectionChecks = 0; // 2 are required
+							struct FDistance{ float W, H; };
+							FDistance DistStart, DistEnd;
 
 							// Check start
 							if ( Spec.Start == NewSpec.Start )
-								ProjectionChecks++;
+								DistStart = {0,0};
 							else
 							{
 								FVector RelativeStart = Spec.Start->Location - NewSpec.Start->Location;
 								FVector ProjectedStart = RelativeSegment * ((RelativeStart | RelativeSegment) / SizeSq);
-								if ( InCylinder( ProjectedStart - RelativeStart, 12, 30) )
-									ProjectionChecks++;
+								FVector Offset = ProjectedStart - RelativeStart;
+								DistStart = { Offset.Size2D(), Abs(Offset.Z) };
 							}
 
 							// Check end
 							if ( Spec.End == NewSpec.End )
-								ProjectionChecks++;
+								DistEnd = {0,0};
 							else
 							{
 								FVector RelativeEnd = Spec.End->Location - NewSpec.Start->Location;
 								FVector ProjectedEnd = RelativeSegment * ((RelativeEnd | RelativeSegment) / SizeSq);
-								if ( InCylinder( ProjectedEnd - RelativeEnd, 12, 30) )
-									ProjectionChecks++;
+								FVector Offset = ProjectedEnd - RelativeEnd;
+								DistEnd = { Offset.Size2D(), Abs(Offset.Z) };
 							}
 
-							if ( ProjectionChecks == 2 )
-							{
-								Spec.CollisionRadius = Max( Spec.CollisionRadius, NewSpec.CollisionRadius);
-								Spec.CollisionHeight = Max( Spec.CollisionHeight, NewSpec.CollisionHeight);
-							}
+							// How much can we expand existing segment's width?
+							FDistance Expand = { 100.0f / (DistStart.W+DistEnd.W+1.0f), 100.0f / (DistStart.H+DistEnd.H+1.0f) };
+							if ( Spec.CollisionRadius < NewSpec.CollisionRadius )
+								Spec.CollisionRadius = Min( Spec.CollisionRadius + appFloor(Expand.W), NewSpec.CollisionRadius);
+							if ( Spec.CollisionHeight < NewSpec.CollisionHeight )
+								Spec.CollisionHeight = Min( Spec.CollisionHeight + appFloor(Expand.H), NewSpec.CollisionHeight);
+
 						}
 
 						// When the existing small 'middle' reachSpec is bigger...
