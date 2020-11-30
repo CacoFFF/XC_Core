@@ -694,6 +694,10 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 		appMemcpy( MiddlePoints, Paths, MiddleCount * sizeof(ANavigationPoint*));
 	}
 
+	//Create route storage
+//	INT RouteSize = 0;
+//	FReachSpec** Route = new(GMem,MiddleCount+1) FReachSpec*;
+
 	//A=Start, B=End
 	for ( int32 RoundTrip=0 ; RoundTrip<2 ; RoundTrip++, Exchange(A,B) )
 	{
@@ -711,13 +715,10 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 		NewSpec.distance = 99999;
 		INT OutPaths = CountPaths(A->Paths);
 		INT InPaths = CountPaths(B->upstreamPaths);
-		if ( (OutPaths < 8) && (InPaths < 8) )
-		{
-			NewSpec = CreateSpec( A, B);
-			// Failed to create reachSpec, no need to prune-check
-			if ( !NewSpec.Start || !NewSpec.End )
-				continue;
-		}
+
+		// Lists are full
+		if ( OutPaths >= 16 || InPaths >= 16 )
+			continue;
 
 		//Evaluate pruning first
 		int32 Prune = 0;
@@ -734,32 +735,78 @@ inline void FPathBuilderMaster::DefineFor( ANavigationPoint* A, ANavigationPoint
 			while ( i < k )
 			{
 				ANavigationPoint* Start = Paths[i++];
-				for ( int32 j=0 ; j<16 ; j++ )
+				int32 iPaths = ValidPaths(Start->Paths);
+				for ( int32 j=0 ; j<iPaths ; j++ )
 				{
-					int32 rIdx = Start->Paths[j];
-					if ( rIdx < 0 || rIdx >= Level->ReachSpecs.Num() || !Level->ReachSpecs(rIdx).End )
-					{
-						if ( Start->Paths[j] != INDEX_NONE )
-						{
-							if ( i < 15 )
-								appMemmove( Start->Paths+i, Start->Paths+i+1, sizeof(int32)*(16-i));
-							Start->Paths[15] = INDEX_NONE;
-						}
-						continue;
-					}
-					const FReachSpec& Spec = Level->ReachSpecs(Start->Paths[j]);
+					FReachSpec& Spec = Level->ReachSpecs(Start->Paths[j]);
 
 					// Examine this section of the route, if the reachSpec is significantly smaller
 					// or has a different locomotion method, then do not consider as valid route
 					// This will reduce the chances of the path being pruned.
 					constexpr INT R_RELEVANT = (R_WALK|R_FLY|R_SWIM);
-					if	(	(NewSpec.reachFlags != 0xFFFFFFFF) // New spec has been defined
-						&&	!(Spec.reachFlags & R_SPECIAL) // R_SPECIAL reachSpecs are always part of the route
-						&&	(Spec.CollisionRadius < 60 || Spec.CollisionHeight < 60) // Only filter small reachspecs
-						&&	(	Spec.CollisionHeight < NewSpec.CollisionHeight // New spec is taller
-							||	Spec.CollisionRadius < NewSpec.CollisionRadius // New spec is wider
-							||	(Spec.reachFlags & NewSpec.reachFlags & R_RELEVANT) != (Spec.reachFlags & R_RELEVANT)) ) // New spec has less requirements
-						continue;
+					// Stop prune if segment...
+					if	(	!(Spec.reachFlags & R_SPECIAL) // ...does not require special locomotion (R_SPECIAL always allows pruning)
+						&&	(Spec.CollisionRadius < 60 || Spec.CollisionHeight < 60) ) // ...only allows smaller pawns.
+					{
+						// On-demand define the new reachSpec
+						if ( NewSpec.reachFlags == 0xFFFFFFFF )
+						{
+							NewSpec = CreateSpec( A, B);
+							// Failed to create reachSpec, this prune check is no longer needed
+							if ( !NewSpec.Start || !NewSpec.End )
+							{
+								i = k;
+								break;
+							}
+						}
+						
+						// If New spec is wider but occupies a very similar space to the shorter old spec
+						// then expand the old spec to have the same width as one we're evaluating for prune
+						if ( Spec.CollisionRadius < NewSpec.CollisionRadius || Spec.CollisionHeight < NewSpec.CollisionHeight )
+						{
+							FVector RelativeSegment = NewSpec.End->Location - NewSpec.Start->Location;
+							FLOAT SizeSq = RelativeSegment.SizeSquared();
+
+							int32 ProjectionChecks = 0; // 2 are required
+
+							// Check start
+							if ( Spec.Start == NewSpec.Start )
+								ProjectionChecks++;
+							else
+							{
+								FVector RelativeStart = Spec.Start->Location - NewSpec.Start->Location;
+								FVector ProjectedStart = RelativeSegment * ((RelativeStart | RelativeSegment) / SizeSq);
+								if ( InCylinder( ProjectedStart - RelativeStart, 12, 30) )
+									ProjectionChecks++;
+							}
+
+							// Check end
+							if ( Spec.End == NewSpec.End )
+								ProjectionChecks++;
+							else
+							{
+								FVector RelativeEnd = Spec.End->Location - NewSpec.Start->Location;
+								FVector ProjectedEnd = RelativeSegment * ((RelativeEnd | RelativeSegment) / SizeSq);
+								if ( InCylinder( ProjectedEnd - RelativeEnd, 12, 30) )
+									ProjectionChecks++;
+							}
+
+							if ( ProjectionChecks == 2 )
+							{
+								Spec.CollisionRadius = Max( Spec.CollisionRadius, NewSpec.CollisionRadius);
+								Spec.CollisionHeight = Max( Spec.CollisionHeight, NewSpec.CollisionHeight);
+							}
+						}
+
+						// When the existing small 'middle' reachSpec is bigger...
+						if	(	(Spec.CollisionRadius < 60 || Spec.CollisionHeight < 60) // Only filter small reachspecs
+							&&	(	Spec.CollisionHeight < NewSpec.CollisionHeight // New spec is taller
+								||	Spec.CollisionRadius < NewSpec.CollisionRadius // New spec is wider
+								||	(Spec.reachFlags & NewSpec.reachFlags & R_RELEVANT) != (Spec.reachFlags & R_RELEVANT)) ) // New spec has less requirements
+							continue;
+					}
+
+
 
 					ANavigationPoint* End = (ANavigationPoint*)Spec.End;
 					//CUT HERE!!
@@ -992,6 +1039,26 @@ inline int FPathBuilderMaster::AttachReachSpec( const FReachSpec& Spec, int32 bP
 		return 0;
 	}
 	return 1;
+}
+
+int32 FPathBuilderMaster::ValidPaths( int32* Paths)
+{
+	int32 i = 0;
+	int32 j = 0;
+	TArray<FReachSpec>& ReachSpecs = Level->ReachSpecs;
+	while ( j < 16 )
+	{
+		if ( (Paths[i] < 0) || (Paths[i] >= ReachSpecs.Num()) || !ReachSpecs(Paths[i]).End || !ReachSpecs(Paths[i]).Start )
+		{
+			if ( i != j )
+				Paths[i] = Paths[j];
+			Paths[j] = INDEX_NONE;
+		}
+		else
+			i++;
+		j++;
+	}
+	return i;
 }
 
 //============== Physics utils

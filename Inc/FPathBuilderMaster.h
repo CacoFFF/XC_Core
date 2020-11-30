@@ -65,6 +65,7 @@ private:
 	void DefineFor( ANavigationPoint* A, ANavigationPoint* B);
 	FReachSpec CreateSpec( ANavigationPoint* Start, ANavigationPoint* End);
 	int AttachReachSpec( const FReachSpec& Spec, int32 bPrune=0);
+	int32 ValidPaths( int32* Paths);
 
 	void GetScout();
 	int FindStart( FVector V);
