@@ -456,28 +456,56 @@ void UXC_CoreStatics::execAllObjects( FFrame& Stack, RESULT_DECL )
 	// Get the parms.
 	P_GET_OBJECT(UClass,objClass);
 	P_GET_OBJECT_REF(UObject,obj);
+	P_GET_OBJECT_OPTX(UObject,InOuter,ANY_PACKAGE);
 	P_FINISH;
 
 	objClass = objClass ? objClass : UObject::StaticClass();
-    TObjectIterator<UObject> It;
 
-	PRE_ITERATOR;
+	if ( (InOuter != ANY_PACKAGE) && Cast<UStruct>(InOuter) && objClass->IsChildOf(UField::StaticClass() ) )
+	{
+		// Special field iterator
+		TFieldIterator<UField> It( (UStruct*)InOuter );
+
+		PRE_ITERATOR;
 		// Fetch next object in the iteration.
 		*obj = NULL;
-        while (It && *obj==NULL)
-        {
-            if (It->IsA(objClass) && !It->IsPendingKill())
-            {
-                *obj = *It;
-            }
-            ++It;
-        }
+		while (It && *obj==NULL)
+		{
+			if (It->IsA(objClass) && !It->IsPendingKill())
+				*obj = *It;
+			++It;
+		}
 		if( *obj == NULL )
 		{
 			Stack.Code = &Stack.Node->Script(wEndOffset + 1);
 			break;
 		}
-	POST_ITERATOR;
+		POST_ITERATOR;
+	}
+	else
+	{
+		// Simple object iterator
+		TObjectIterator<UObject> It;
+
+		PRE_ITERATOR;
+			// Fetch next object in the iteration.
+			*obj = NULL;
+			while (It && *obj==NULL)
+			{
+				if (It->IsA(objClass) && !It->IsPendingKill())
+				{
+					if ( InOuter==ANY_PACKAGE || It->IsIn(InOuter) )
+						*obj = *It;
+				}
+				++It;
+			}
+			if( *obj == NULL )
+			{
+				Stack.Code = &Stack.Node->Script(wEndOffset + 1);
+				break;
+			}
+		POST_ITERATOR;
+	}
 }
 
 void UXC_CoreStatics::execMapRoutes( FFrame &Stack, RESULT_DECL)

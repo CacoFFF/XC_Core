@@ -33,7 +33,7 @@ native /* (257)*/ static final function bool LoadPackageContents( string Package
 native /* (391)*/ static final function name StringToName( string S );
 native /* (600)*/ static final function Object FindObject( string ObjectName, class ObjectClass, optional Object ObjOuter ); //ObjOuter param incompatible with 227!!!
 native /* (601)*/ static final function Class<Object> GetParentClass( Class<Object> ObjClass );
-native /* (602)*/ static final iterator function AllObjects( class<Object> BaseClass, out Object Obj );
+native /* (602)*/ static final iterator function AllObjects( class<Object> BaseClass, out Object Obj, optional Object ObjOuter); //ObjOuter param incompatible with 227!!!
 native /* (643)*/ static final function float AppSeconds();
 
 //SDK copy opcodes (originally 2xxx)
