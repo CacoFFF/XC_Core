@@ -21,8 +21,9 @@ void DoublePlaneDot( const FPlane& Plane, const CFVector4& Start, const CFVector
 	if ( sizeof(FPlane) == 16 )
 	{
 		CFVector4 VPlane( &Plane.X);
-		CFVector4 VStart = _mm_or_ps( _mm_and_ps( Start, CIVector4::MASK_3D), WMinusOne); // Set W to -1
-		CFVector4 VEnd   = _mm_or_ps( _mm_and_ps( End  , CIVector4::MASK_3D), WMinusOne); // ORPS has very low latency and CPI
+		CF_reg128 minus_one = WMinusOne.reg_f();
+		CFVector4 VStart = _mm_or_ps( _mm_and_ps( Start.reg_f(), CIVector4::MASK_3D), minus_one); // Set W to -1
+		CFVector4 VEnd   = _mm_or_ps( _mm_and_ps( End.reg_f()  , CIVector4::MASK_3D), minus_one); // ORPS has very low latency and CPI
 		Dist2[0] = VStart | VPlane;
 		Dist2[1] = VEnd   | VPlane;
 	}

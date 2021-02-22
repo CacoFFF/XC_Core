@@ -224,6 +224,12 @@ void UXC_Download::Tick()
 		}
 		GFileManager->Delete( TempFilename);
 		Connection->Driver->Notify->NotifyReceivedFile( Connection, PackageIndex, Error, 0);
+
+		if ( RecvFileAr )
+		{
+			delete RecvFileAr;
+			RecvFileAr = nullptr;
+		}
 	}
 	unguard;
 }

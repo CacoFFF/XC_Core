@@ -152,9 +152,9 @@ int StaticInitScriptCompiler()
 	if ( Initialized++ )
 		return 0; 
 
-	constexpr size_t CompileScripts_Offset                = 0x7AD50;
-	constexpr size_t MakeScripts_to_CompileScripts_Offset = 0x8061A;
-	constexpr size_t FindField_Offset                     = 0x7CE20;
+	constexpr size_t CompileScripts_Offset                = 0x79B80;
+	constexpr size_t MakeScripts_to_CompileScripts_Offset = 0x7ED73;
+	constexpr size_t FindField_Offset                     = 0x7B910;
 
 	// Get CompileScripts global/static
 	CompileScripts.Type1 = EditorBase + CompileScripts_Offset;

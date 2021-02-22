@@ -910,7 +910,8 @@ void ULZMAServer::UpdatePackageMap( UPackageMap* NewPackageMap)
 					if ( Source )
 						Sources.AddItem(Source);
 				}
-				Source->Priority = It.GetIndex() == 0 ? 10 : 0; //Level goes first
+				if ( Source )
+					Source->Priority = It.GetIndex() == 0 ? 10 : 0; //Level goes first
 			}
 	}
 
